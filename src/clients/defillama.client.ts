@@ -1,9 +1,31 @@
 /**
  * DefiLlama API Client
- * Provides methods to interact with the DefiLlama API
+ * Provides methods to interact with the free (keyless) DefiLlama API.
+ *
+ * DefiLlama splits its free API across a few category-specific hosts. The
+ * canonical routing is:
+ *   - TVL, DEX/options volume, fees/revenue, open interest -> api.llama.fi
+ *   - Coins / prices / blocks                              -> coins.llama.fi
+ *   - Stablecoins                                          -> stablecoins.llama.fi
+ *   - Yields / pools                                       -> yields.llama.fi
  */
 
-const DEFILLAMA_API_BASE_URL = "https://api.llama.fi";
+export const DEFILLAMA_HOSTS = {
+  api: "https://api.llama.fi",
+  coins: "https://coins.llama.fi",
+  stablecoins: "https://stablecoins.llama.fi",
+  yields: "https://yields.llama.fi",
+} as const;
+
+export type QueryValue = string | number | boolean | undefined;
+export type QueryParams = Record<string, QueryValue>;
+
+/** Common query options for the DEX/options/fees overview & summary endpoints. */
+export interface OverviewOptions {
+  excludeTotalDataChart?: boolean;
+  excludeTotalDataChartBreakdown?: boolean;
+  dataType?: string;
+}
 
 // Protocol interfaces
 export interface Protocol {
@@ -58,12 +80,21 @@ export interface ProtocolTvl {
   tvlList: TvlItem[];
 }
 
-// Chain TVL interface
+// Chain TVL interfaces
 export interface ChainTvlItem {
   date: number;
   totalLiquidityUSD: number;
   tvl?: number;
   totalLiquidityETH?: number;
+}
+
+export interface Chain {
+  gecko_id: string | null;
+  tvl: number;
+  tokenSymbol: string | null;
+  cmcId: string | null;
+  name: string;
+  chainId: number | null;
 }
 
 // Token price interfaces
@@ -72,6 +103,7 @@ export interface TokenPrice {
   symbol: string;
   timestamp: number;
   confidence: number;
+  decimals?: number;
 }
 
 export interface TokenPricesResponse {
@@ -109,234 +141,314 @@ export interface StablecoinData extends StablecoinAsset {
 }
 
 export class DefiLlamaClient {
-  private baseUrl: string;
-
-  constructor(baseUrl: string = DEFILLAMA_API_BASE_URL) {
-    this.baseUrl = baseUrl;
-  }
-
   /**
-   * Makes a GET request to the DefiLlama API
+   * Makes a GET request to one of the DefiLlama hosts.
    */
-  private async get<T>(endpoint: string): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`);
-    
+  protected async request<T>(host: string, path: string, query?: QueryParams): Promise<T> {
+    let url = `${host}${path}`;
+
+    if (query) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) {
+          params.append(key, String(value));
+        }
+      }
+      const queryString = params.toString();
+      if (queryString) {
+        url += `?${queryString}`;
+      }
+    }
+
+    const response = await fetch(url);
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`DefiLlama API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
-    
+
     return await response.json() as T;
   }
 
-  /**
-   * Get all protocols
-   */
-  async getProtocols(): Promise<Protocol[]> {
-    return this.get<Protocol[]>('/protocols');
+  /** Joins coin identifiers into the comma-separated form DefiLlama expects. */
+  private joinCoins(coins: string[]): string {
+    if (!coins || coins.length === 0) {
+      throw new Error("At least one coin is required");
+    }
+    return coins.join(",");
   }
 
-  /**
-   * Get TVL data for a specific protocol
-   */
+  // ---------------------------------------------------------------------------
+  // TVL
+  // ---------------------------------------------------------------------------
+
+  /** GET /protocols — list all protocols. */
+  async getProtocols(): Promise<Protocol[]> {
+    return this.request<Protocol[]>(DEFILLAMA_HOSTS.api, "/protocols");
+  }
+
+  /** GET /protocol/{protocol} — full TVL breakdown for a protocol. */
   async getProtocolTvl(protocol: string): Promise<ProtocolTvl> {
     if (!protocol) {
       throw new Error("Protocol name is required");
     }
-    
-    // Get the protocol data
-    const data = await this.get<ProtocolTvl>(`/protocol/${protocol}`);
-    
-    // Ensure tvlList exists for compatibility with tests
+
+    const data = await this.request<ProtocolTvl>(DEFILLAMA_HOSTS.api, `/protocol/${protocol}`);
+
+    // Ensure tvlList exists for downstream consumers that expect a series.
     if (!data.tvlList && data.tvl) {
-      // If tvlList is missing but we have historical data, create it
-      if (data.chainTvls && Object.keys(data.chainTvls).length > 0) {
-        data.tvlList = [{
-          date: Math.floor(Date.now() / 1000),
-          totalLiquidityUSD: data.tvl
-        }];
-      } else {
-        // Create a minimal tvlList with current TVL
-        data.tvlList = [
-          {
-            date: Math.floor(Date.now() / 1000),
-            totalLiquidityUSD: data.tvl
-          }
-        ];
-      }
+      data.tvlList = [{
+        date: Math.floor(Date.now() / 1000),
+        totalLiquidityUSD: data.tvl,
+      }];
     }
-    
+
     return data;
   }
 
-  /**
-   * Get historical TVL data for a specific chain
-   */
+  /** GET /v2/historicalChainTvl — historical TVL across all chains. */
+  async getHistoricalChainTvl(): Promise<ChainTvlItem[]> {
+    return this.request<ChainTvlItem[]>(DEFILLAMA_HOSTS.api, "/v2/historicalChainTvl");
+  }
+
+  /** GET /v2/historicalChainTvl/{chain} — historical TVL for one chain. */
   async getChainTvl(chain: string): Promise<ChainTvlItem[]> {
     if (!chain) {
       throw new Error("Chain name is required");
     }
-    
-    const data = await this.get<ChainTvlItem[]>(`/v2/historicalChainTvl/${chain}`);
-    
-    // Ensure each item has totalLiquidityUSD for compatibility with tests
+
+    const data = await this.request<ChainTvlItem[]>(DEFILLAMA_HOSTS.api, `/v2/historicalChainTvl/${chain}`);
+
+    // Normalize so each item exposes totalLiquidityUSD.
     if (Array.isArray(data)) {
       return data.map(item => {
         if (!item.totalLiquidityUSD && (item.tvl || item.totalLiquidityETH)) {
           return {
             ...item,
-            totalLiquidityUSD: item.tvl || item.totalLiquidityETH || 0
+            totalLiquidityUSD: item.tvl || item.totalLiquidityETH || 0,
           };
         }
         return item;
       });
     }
-    
+
     return data;
   }
 
-  /**
-   * Get current prices for specified tokens/coins
-   */
+  /** GET /tvl/{protocol} — current TVL of a protocol as a single number. */
+  async getCurrentProtocolTvl(protocol: string): Promise<number> {
+    if (!protocol) {
+      throw new Error("Protocol name is required");
+    }
+    return this.request<number>(DEFILLAMA_HOSTS.api, `/tvl/${protocol}`);
+  }
+
+  /** GET /v2/chains — current TVL of all chains. */
+  async getChains(): Promise<Chain[]> {
+    return this.request<Chain[]>(DEFILLAMA_HOSTS.api, "/v2/chains");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Coins / Prices
+  // ---------------------------------------------------------------------------
+
+  /** GET /prices/current/{coins} — current prices for the given coins. */
   async getTokenPrices(coins: string[]): Promise<TokenPricesResponse> {
-    if (!coins || coins.length === 0) {
-      throw new Error("At least one coin is required");
+    return this.request<TokenPricesResponse>(DEFILLAMA_HOSTS.coins, `/prices/current/${this.joinCoins(coins)}`);
+  }
+
+  /** GET /prices/historical/{timestamp}/{coins} — prices at a timestamp. */
+  async getHistoricalPrices(coins: string[], timestamp: number): Promise<TokenPricesResponse> {
+    const coinsParam = this.joinCoins(coins);
+    if (!timestamp) {
+      throw new Error("Timestamp is required");
     }
-    
-    try {
-      const coinsParam = coins.join(',');
-      const data = await this.get<TokenPricesResponse>(`/prices/current/${coinsParam}`);
-      return data;
-    } catch (error) {
-      // If the API returns an error, return a mock response for compatibility with tests
-      console.warn("Error fetching token prices, returning mock data:", error);
-      const result: TokenPricesResponse = { coins: {} };
-      
-      coins.forEach(coin => {
-        result.coins[coin] = {
-          price: 100 + Math.random() * 900,
-          symbol: coin.split(':').pop() || 'MOCK',
-          timestamp: Math.floor(Date.now() / 1000),
-          confidence: 0.99
-        };
-      });
-      
-      return result;
-    }
+    return this.request<TokenPricesResponse>(DEFILLAMA_HOSTS.coins, `/prices/historical/${timestamp}/${coinsParam}`);
   }
 
   /**
-   * Get historical prices for specified tokens/coins at a specific timestamp
+   * GET /batchHistorical — historical prices for many coins at many timestamps.
+   * @param coins Map of coin identifier to an array of UNIX timestamps.
    */
-  async getHistoricalPrices(coins: string[], timestamp: number): Promise<TokenPricesResponse> {
-    if (!coins || coins.length === 0) {
+  async getBatchHistoricalPrices(coins: Record<string, number[]>, searchWidth?: string): Promise<TokenPricesResponse> {
+    if (!coins || Object.keys(coins).length === 0) {
       throw new Error("At least one coin is required");
+    }
+    return this.request<TokenPricesResponse>(DEFILLAMA_HOSTS.coins, "/batchHistorical", {
+      coins: JSON.stringify(coins),
+      searchWidth,
+    });
+  }
+
+  /** GET /chart/{coins} — price chart for the given coins. */
+  async getPriceChart(
+    coins: string[],
+    options: { start?: number; end?: number; span?: number; period?: string; searchWidth?: string } = {}
+  ): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.coins, `/chart/${this.joinCoins(coins)}`, { ...options });
+  }
+
+  /** GET /percentage/{coins} — percentage price change for the given coins. */
+  async getPricePercentageChange(
+    coins: string[],
+    options: { timestamp?: number; lookForward?: boolean; period?: string } = {}
+  ): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.coins, `/percentage/${this.joinCoins(coins)}`, { ...options });
+  }
+
+  /** GET /prices/first/{coins} — earliest recorded price for the given coins. */
+  async getFirstPrices(coins: string[]): Promise<TokenPricesResponse> {
+    return this.request<TokenPricesResponse>(DEFILLAMA_HOSTS.coins, `/prices/first/${this.joinCoins(coins)}`);
+  }
+
+  /** GET /block/{chain}/{timestamp} — closest block to a timestamp on a chain. */
+  async getBlock(chain: string, timestamp: number): Promise<{ height: number; timestamp: number }> {
+    if (!chain) {
+      throw new Error("Chain name is required");
     }
     if (!timestamp) {
       throw new Error("Timestamp is required");
     }
-    
-    try {
-      const coinsParam = coins.join(',');
-      const data = await this.get<TokenPricesResponse>(`/prices/historical/${timestamp}/${coinsParam}`);
-      return data;
-    } catch (error) {
-      // If the API returns an error, return a mock response for compatibility with tests
-      console.warn("Error fetching historical prices, returning mock data:", error);
-      const result: TokenPricesResponse = { coins: {} };
-      
-      coins.forEach(coin => {
-        result.coins[coin] = {
-          price: 100 + Math.random() * 900,
-          symbol: coin.split(':').pop() || 'MOCK',
-          timestamp: timestamp,
-          confidence: 0.95
-        };
-      });
-      
-      return result;
-    }
+    return this.request<{ height: number; timestamp: number }>(DEFILLAMA_HOSTS.coins, `/block/${chain}/${timestamp}`);
   }
 
-  /**
-   * Get all stablecoins data
-   */
-  async getStablecoins(): Promise<StablecoinsResponse> {
-    try {
-      return await this.get<StablecoinsResponse>('/stablecoins');
-    } catch (error) {
-      // If the API returns an error, return a mock response for compatibility with tests
-      console.warn("Error fetching stablecoins, returning mock data:", error);
-      return {
-        peggedAssets: [
-          {
-            id: "1",
-            name: "USD Coin",
-            symbol: "USDC",
-            price: 1.0,
-            circulating: {
-              peggedUSD: 1000000000
-            },
-            chainCirculating: {
-              ethereum: {
-                peggedUSD: 800000000
-              },
-              polygon: {
-                peggedUSD: 200000000
-              }
-            }
-          }
-        ]
-      };
-    }
+  // ---------------------------------------------------------------------------
+  // Stablecoins
+  // ---------------------------------------------------------------------------
+
+  /** GET /stablecoins — list all stablecoins with circulating amounts. */
+  async getStablecoins(includePrices?: boolean): Promise<StablecoinsResponse> {
+    return this.request<StablecoinsResponse>(DEFILLAMA_HOSTS.stablecoins, "/stablecoins", { includePrices });
   }
 
-  /**
-   * Get data for a specific stablecoin
-   */
+  /** GET /stablecoincharts/all — historical mcap sum of all stablecoins. */
+  async getStablecoinChartsAll(stablecoin?: number | string): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.stablecoins, "/stablecoincharts/all", { stablecoin });
+  }
+
+  /** GET /stablecoincharts/{chain} — historical mcap of stablecoins on a chain. */
+  async getStablecoinChartsChain(chain: string, stablecoin?: number | string): Promise<unknown> {
+    if (!chain) {
+      throw new Error("Chain name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.stablecoins, `/stablecoincharts/${chain}`, { stablecoin });
+  }
+
+  /** GET /stablecoin/{asset} — historical data for a single stablecoin. */
   async getStablecoinData(asset: string): Promise<StablecoinData> {
     if (!asset) {
       throw new Error("Asset name is required");
     }
-    
-    try {
-      return await this.get<StablecoinData>(`/stablecoin/${asset}`);
-    } catch (error) {
-      // If the API returns an error, return a mock response for compatibility with tests
-      console.warn(`Error fetching stablecoin data for ${asset}, returning mock data:`, error);
-      return {
-        id: asset,
-        name: `${asset}`,
-        symbol: asset.toUpperCase(),
-        price: 1.0,
-        circulating: {
-          peggedUSD: 1000000000
-        },
-        chainCirculating: {
-          ethereum: {
-            peggedUSD: 800000000
-          },
-          polygon: {
-            peggedUSD: 200000000
-          }
-        },
-        pegType: "peggedUSD",
-        priceSource: "oracle",
-        pegMechanism: "algorithmic",
-        circulating7dAgo: {
-          peggedUSD: 950000000
-        },
-        circulatingPrevDay: {
-          peggedUSD: 980000000
-        },
-        circulatingPrevWeek: {
-          peggedUSD: 950000000
-        },
-        delisted: false
-      };
+    return this.request<StablecoinData>(DEFILLAMA_HOSTS.stablecoins, `/stablecoin/${asset}`);
+  }
+
+  /** GET /stablecoinchains — current stablecoin totals per chain. */
+  async getStablecoinChains(): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.stablecoins, "/stablecoinchains");
+  }
+
+  /** GET /stablecoinprices — historical stablecoin prices. */
+  async getStablecoinPrices(): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.stablecoins, "/stablecoinprices");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Yields / APY
+  // ---------------------------------------------------------------------------
+
+  /** GET /pools — latest data for all yield pools. */
+  async getPools(): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.yields, "/pools");
+  }
+
+  /** GET /chart/{pool} — historical APY and TVL for a pool. */
+  async getPoolChart(pool: string): Promise<unknown> {
+    if (!pool) {
+      throw new Error("Pool ID is required");
     }
+    return this.request<unknown>(DEFILLAMA_HOSTS.yields, `/chart/${pool}`);
+  }
+
+  // ---------------------------------------------------------------------------
+  // DEX / Options volume
+  // ---------------------------------------------------------------------------
+
+  /** GET /overview/dexs — DEX volume overview across all chains. */
+  async getDexsOverview(options: OverviewOptions = {}): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, "/overview/dexs", { ...options });
+  }
+
+  /** GET /overview/dexs/{chain} — DEX volume overview for a chain. */
+  async getDexsOverviewByChain(chain: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!chain) {
+      throw new Error("Chain name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/overview/dexs/${chain}`, { ...options });
+  }
+
+  /** GET /summary/dexs/{protocol} — DEX volume summary for a protocol. */
+  async getDexSummary(protocol: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!protocol) {
+      throw new Error("Protocol name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/summary/dexs/${protocol}`, { ...options });
+  }
+
+  /** GET /overview/options — options volume overview across all chains. */
+  async getOptionsOverview(options: OverviewOptions = {}): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, "/overview/options", { ...options });
+  }
+
+  /** GET /overview/options/{chain} — options volume overview for a chain. */
+  async getOptionsOverviewByChain(chain: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!chain) {
+      throw new Error("Chain name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/overview/options/${chain}`, { ...options });
+  }
+
+  /** GET /summary/options/{protocol} — options volume summary for a protocol. */
+  async getOptionSummary(protocol: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!protocol) {
+      throw new Error("Protocol name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/summary/options/${protocol}`, { ...options });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Perps / Open interest
+  // ---------------------------------------------------------------------------
+
+  /** GET /overview/open-interest — perps open interest overview. */
+  async getOpenInterestOverview(options: OverviewOptions = {}): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, "/overview/open-interest", { ...options });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fees / Revenue
+  // ---------------------------------------------------------------------------
+
+  /** GET /overview/fees — fees/revenue overview across all chains. */
+  async getFeesOverview(options: OverviewOptions = {}): Promise<unknown> {
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, "/overview/fees", { ...options });
+  }
+
+  /** GET /overview/fees/{chain} — fees/revenue overview for a chain. */
+  async getFeesOverviewByChain(chain: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!chain) {
+      throw new Error("Chain name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/overview/fees/${chain}`, { ...options });
+  }
+
+  /** GET /summary/fees/{protocol} — fees/revenue summary for a protocol. */
+  async getFeeSummary(protocol: string, options: OverviewOptions = {}): Promise<unknown> {
+    if (!protocol) {
+      throw new Error("Protocol name is required");
+    }
+    return this.request<unknown>(DEFILLAMA_HOSTS.api, `/summary/fees/${protocol}`, { ...options });
   }
 }
 
 // Export a singleton instance for use throughout the application
-export const defiLlamaClient = new DefiLlamaClient(); 
+export const defiLlamaClient = new DefiLlamaClient();

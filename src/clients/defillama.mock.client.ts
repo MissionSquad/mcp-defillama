@@ -3,19 +3,24 @@
  * Provides mock implementations of the DefiLlama API methods
  */
 
-import { 
-  DefiLlamaClient, 
-  Protocol, 
-  ProtocolTvl, 
-  ChainTvlItem, 
-  TokenPricesResponse, 
-  StablecoinsResponse, 
-  StablecoinData 
+import {
+  DefiLlamaClient,
+  Protocol,
+  ProtocolTvl,
+  ChainTvlItem,
+  TokenPricesResponse,
+  StablecoinsResponse,
+  StablecoinData,
+  QueryParams
 } from "./defillama.client.js";
 
 export class MockDefiLlamaClient extends DefiLlamaClient {
-  constructor() {
-    super("mock://api.llama.fi"); // Using a mock URL prefix to make it clear this is a mock
+  /**
+   * Generic stub for every endpoint that isn't given a bespoke mock below.
+   * Keeps test mode (TEST_MODE=true) fully offline for the newer endpoints.
+   */
+  protected async request<T>(host: string, path: string, _query?: QueryParams): Promise<T> {
+    return { mock: true, host, path } as unknown as T;
   }
 
   /**
