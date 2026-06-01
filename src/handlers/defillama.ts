@@ -1,5 +1,19 @@
 import { ToolResultSchema } from "../types.js";
-import { createErrorResponse, createSuccessResponse } from "./utils.js";
+import { createErrorResponse, jsonResponse } from "./utils.js";
+import { parseDateTimeToUnix } from "./datetime.js";
+import {
+  CompactOptions,
+  humanizeDates,
+  compactProtocols,
+  compactProtocolTvl,
+  compactSeries,
+  compactChains,
+  compactPools,
+  compactStablecoins,
+  compactStablecoinData,
+  compactStablecoinChains,
+  compactOverview,
+} from "./transform.js";
 import {
   GetProtocolsInput,
   GetProtocolTvlInput,
@@ -42,21 +56,36 @@ const defiLlamaClient = getDefiLlamaClient();
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** Pull the shared overview/summary query options out of a handler input. */
-const overviewOptions = (input: OverviewOptionsInput = {}): OverviewOptions => ({
-  excludeTotalDataChart: input.excludeTotalDataChart,
-  excludeTotalDataChartBreakdown: input.excludeTotalDataChartBreakdown,
-  dataType: input.dataType,
+/** Pull the compaction controls out of a handler input. */
+const compactOpts = (input: any = {}): CompactOptions => ({
+  full: input.full,
+  points: input.points,
+  limit: input.limit,
+  includeTokens: input.includeTokens,
 });
+
+/**
+ * Build the query for the DEX/options/fees overview & summary endpoints.
+ * Charts are excluded by default (huge); pass `full: true` or the explicit
+ * exclude flags to change that.
+ */
+const overviewQuery = (input: OverviewOptionsInput = {}): OverviewOptions => {
+  const defaultExclude = !input.full;
+  return {
+    excludeTotalDataChart: input.excludeTotalDataChart ?? defaultExclude,
+    excludeTotalDataChartBreakdown: input.excludeTotalDataChartBreakdown ?? defaultExclude,
+    dataType: input.dataType,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // TVL
 // ---------------------------------------------------------------------------
 
-export const getProtocolsHandler = async (_input: GetProtocolsInput): Promise<ToolResultSchema> => {
+export const getProtocolsHandler = async (input: GetProtocolsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getProtocols();
-    return createSuccessResponse(`Protocols: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactProtocols(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting protocols: ${errorMessage(error)}`);
   }
@@ -65,16 +94,16 @@ export const getProtocolsHandler = async (_input: GetProtocolsInput): Promise<To
 export const getProtocolTvlHandler = async (input: GetProtocolTvlInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getProtocolTvl(input.protocol);
-    return createSuccessResponse(`Protocol TVL: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactProtocolTvl(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting protocol TVL: ${errorMessage(error)}`);
   }
 };
 
-export const getHistoricalChainTvlHandler = async (_input: GetHistoricalChainTvlInput): Promise<ToolResultSchema> => {
+export const getHistoricalChainTvlHandler = async (input: GetHistoricalChainTvlInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getHistoricalChainTvl();
-    return createSuccessResponse(`Historical chain TVL: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting historical chain TVL: ${errorMessage(error)}`);
   }
@@ -83,7 +112,7 @@ export const getHistoricalChainTvlHandler = async (_input: GetHistoricalChainTvl
 export const getChainTvlHandler = async (input: GetChainTvlInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getChainTvl(input.chain);
-    return createSuccessResponse(`Chain TVL: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting chain TVL: ${errorMessage(error)}`);
   }
@@ -92,16 +121,16 @@ export const getChainTvlHandler = async (input: GetChainTvlInput): Promise<ToolR
 export const getCurrentProtocolTvlHandler = async (input: GetCurrentProtocolTvlInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getCurrentProtocolTvl(input.protocol);
-    return createSuccessResponse(`Current protocol TVL: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting current protocol TVL: ${errorMessage(error)}`);
   }
 };
 
-export const getChainsHandler = async (_input: GetChainsInput): Promise<ToolResultSchema> => {
+export const getChainsHandler = async (input: GetChainsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getChains();
-    return createSuccessResponse(`Chains: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactChains(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting chains: ${errorMessage(error)}`);
   }
@@ -114,7 +143,7 @@ export const getChainsHandler = async (_input: GetChainsInput): Promise<ToolResu
 export const getTokenPricesHandler = async (input: GetTokenPricesInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getTokenPrices(input.coins);
-    return createSuccessResponse(`Token prices: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting token prices: ${errorMessage(error)}`);
   }
@@ -122,8 +151,9 @@ export const getTokenPricesHandler = async (input: GetTokenPricesInput): Promise
 
 export const getHistoricalPricesHandler = async (input: GetHistoricalPricesInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getHistoricalPrices(input.coins, input.timestamp);
-    return createSuccessResponse(`Historical prices: ${JSON.stringify(data, null, 2)}`);
+    const timestamp = parseDateTimeToUnix(input.timestamp);
+    const data = await defiLlamaClient.getHistoricalPrices(input.coins, timestamp);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting historical prices: ${errorMessage(error)}`);
   }
@@ -131,8 +161,12 @@ export const getHistoricalPricesHandler = async (input: GetHistoricalPricesInput
 
 export const getBatchHistoricalPricesHandler = async (input: GetBatchHistoricalPricesInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getBatchHistoricalPrices(input.coins, input.searchWidth);
-    return createSuccessResponse(`Batch historical prices: ${JSON.stringify(data, null, 2)}`);
+    const coins: Record<string, number[]> = {};
+    for (const [coin, times] of Object.entries(input.coins ?? {})) {
+      coins[coin] = (times ?? []).map(parseDateTimeToUnix);
+    }
+    const data = await defiLlamaClient.getBatchHistoricalPrices(coins, input.searchWidth);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting batch historical prices: ${errorMessage(error)}`);
   }
@@ -140,9 +174,14 @@ export const getBatchHistoricalPricesHandler = async (input: GetBatchHistoricalP
 
 export const getPriceChartHandler = async (input: GetPriceChartInput): Promise<ToolResultSchema> => {
   try {
-    const { coins, ...options } = input;
-    const data = await defiLlamaClient.getPriceChart(coins, options);
-    return createSuccessResponse(`Price chart: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getPriceChart(input.coins, {
+      start: input.start !== undefined ? parseDateTimeToUnix(input.start) : undefined,
+      end: input.end !== undefined ? parseDateTimeToUnix(input.end) : undefined,
+      span: input.span,
+      period: input.period,
+      searchWidth: input.searchWidth,
+    });
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting price chart: ${errorMessage(error)}`);
   }
@@ -150,9 +189,12 @@ export const getPriceChartHandler = async (input: GetPriceChartInput): Promise<T
 
 export const getPricePercentageChangeHandler = async (input: GetPricePercentageChangeInput): Promise<ToolResultSchema> => {
   try {
-    const { coins, ...options } = input;
-    const data = await defiLlamaClient.getPricePercentageChange(coins, options);
-    return createSuccessResponse(`Price percentage change: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getPricePercentageChange(input.coins, {
+      timestamp: input.timestamp !== undefined ? parseDateTimeToUnix(input.timestamp) : undefined,
+      lookForward: input.lookForward,
+      period: input.period,
+    });
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting price percentage change: ${errorMessage(error)}`);
   }
@@ -161,7 +203,7 @@ export const getPricePercentageChangeHandler = async (input: GetPricePercentageC
 export const getFirstPricesHandler = async (input: GetFirstPricesInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getFirstPrices(input.coins);
-    return createSuccessResponse(`First prices: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting first prices: ${errorMessage(error)}`);
   }
@@ -169,8 +211,9 @@ export const getFirstPricesHandler = async (input: GetFirstPricesInput): Promise
 
 export const getBlockHandler = async (input: GetBlockInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getBlock(input.chain, input.timestamp);
-    return createSuccessResponse(`Block: ${JSON.stringify(data, null, 2)}`);
+    const timestamp = parseDateTimeToUnix(input.timestamp);
+    const data = await defiLlamaClient.getBlock(input.chain, timestamp);
+    return jsonResponse(humanizeDates(data));
   } catch (error) {
     return createErrorResponse(`Error getting block: ${errorMessage(error)}`);
   }
@@ -183,7 +226,7 @@ export const getBlockHandler = async (input: GetBlockInput): Promise<ToolResultS
 export const getStablecoinsHandler = async (input: GetStablecoinsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoins(input?.includePrices);
-    return createSuccessResponse(`Stablecoins: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactStablecoins(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoins: ${errorMessage(error)}`);
   }
@@ -192,7 +235,7 @@ export const getStablecoinsHandler = async (input: GetStablecoinsInput): Promise
 export const getStablecoinChartsAllHandler = async (input: GetStablecoinChartsAllInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinChartsAll(input?.stablecoin);
-    return createSuccessResponse(`Stablecoin charts (all): ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin charts: ${errorMessage(error)}`);
   }
@@ -201,7 +244,7 @@ export const getStablecoinChartsAllHandler = async (input: GetStablecoinChartsAl
 export const getStablecoinChartsChainHandler = async (input: GetStablecoinChartsChainInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinChartsChain(input.chain, input.stablecoin);
-    return createSuccessResponse(`Stablecoin charts (chain): ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin charts for chain: ${errorMessage(error)}`);
   }
@@ -210,25 +253,25 @@ export const getStablecoinChartsChainHandler = async (input: GetStablecoinCharts
 export const getStablecoinDataHandler = async (input: GetStablecoinDataInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinData(input.asset);
-    return createSuccessResponse(`Stablecoin data: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactStablecoinData(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin data: ${errorMessage(error)}`);
   }
 };
 
-export const getStablecoinChainsHandler = async (_input: GetStablecoinChainsInput): Promise<ToolResultSchema> => {
+export const getStablecoinChainsHandler = async (input: GetStablecoinChainsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinChains();
-    return createSuccessResponse(`Stablecoin chains: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactStablecoinChains(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin chains: ${errorMessage(error)}`);
   }
 };
 
-export const getStablecoinPricesHandler = async (_input: GetStablecoinPricesInput): Promise<ToolResultSchema> => {
+export const getStablecoinPricesHandler = async (input: GetStablecoinPricesInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinPrices();
-    return createSuccessResponse(`Stablecoin prices: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin prices: ${errorMessage(error)}`);
   }
@@ -238,10 +281,10 @@ export const getStablecoinPricesHandler = async (_input: GetStablecoinPricesInpu
 // Yields / APY
 // ---------------------------------------------------------------------------
 
-export const getPoolsHandler = async (_input: GetPoolsInput): Promise<ToolResultSchema> => {
+export const getPoolsHandler = async (input: GetPoolsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getPools();
-    return createSuccessResponse(`Pools: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactPools(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting pools: ${errorMessage(error)}`);
   }
@@ -250,7 +293,7 @@ export const getPoolsHandler = async (_input: GetPoolsInput): Promise<ToolResult
 export const getPoolChartHandler = async (input: GetPoolChartInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getPoolChart(input.pool);
-    return createSuccessResponse(`Pool chart: ${JSON.stringify(data, null, 2)}`);
+    return jsonResponse(humanizeDates(compactSeries(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting pool chart: ${errorMessage(error)}`);
   }
@@ -262,8 +305,8 @@ export const getPoolChartHandler = async (input: GetPoolChartInput): Promise<Too
 
 export const getDexsOverviewHandler = async (input: GetDexsOverviewInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getDexsOverview(overviewOptions(input));
-    return createSuccessResponse(`DEXs overview: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getDexsOverview(overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting DEXs overview: ${errorMessage(error)}`);
   }
@@ -271,8 +314,8 @@ export const getDexsOverviewHandler = async (input: GetDexsOverviewInput): Promi
 
 export const getDexsOverviewByChainHandler = async (input: GetDexsOverviewByChainInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getDexsOverviewByChain(input.chain, overviewOptions(input));
-    return createSuccessResponse(`DEXs overview (chain): ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getDexsOverviewByChain(input.chain, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting DEXs overview for chain: ${errorMessage(error)}`);
   }
@@ -280,8 +323,8 @@ export const getDexsOverviewByChainHandler = async (input: GetDexsOverviewByChai
 
 export const getDexSummaryHandler = async (input: GetDexSummaryInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getDexSummary(input.protocol, overviewOptions(input));
-    return createSuccessResponse(`DEX summary: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getDexSummary(input.protocol, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting DEX summary: ${errorMessage(error)}`);
   }
@@ -289,8 +332,8 @@ export const getDexSummaryHandler = async (input: GetDexSummaryInput): Promise<T
 
 export const getOptionsOverviewHandler = async (input: GetOptionsOverviewInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getOptionsOverview(overviewOptions(input));
-    return createSuccessResponse(`Options overview: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getOptionsOverview(overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting options overview: ${errorMessage(error)}`);
   }
@@ -298,8 +341,8 @@ export const getOptionsOverviewHandler = async (input: GetOptionsOverviewInput):
 
 export const getOptionsOverviewByChainHandler = async (input: GetOptionsOverviewByChainInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getOptionsOverviewByChain(input.chain, overviewOptions(input));
-    return createSuccessResponse(`Options overview (chain): ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getOptionsOverviewByChain(input.chain, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting options overview for chain: ${errorMessage(error)}`);
   }
@@ -307,8 +350,8 @@ export const getOptionsOverviewByChainHandler = async (input: GetOptionsOverview
 
 export const getOptionSummaryHandler = async (input: GetOptionSummaryInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getOptionSummary(input.protocol, overviewOptions(input));
-    return createSuccessResponse(`Options summary: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getOptionSummary(input.protocol, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting options summary: ${errorMessage(error)}`);
   }
@@ -320,8 +363,8 @@ export const getOptionSummaryHandler = async (input: GetOptionSummaryInput): Pro
 
 export const getOpenInterestOverviewHandler = async (input: GetOpenInterestOverviewInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getOpenInterestOverview(overviewOptions(input));
-    return createSuccessResponse(`Open interest overview: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getOpenInterestOverview(overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting open interest overview: ${errorMessage(error)}`);
   }
@@ -333,8 +376,8 @@ export const getOpenInterestOverviewHandler = async (input: GetOpenInterestOverv
 
 export const getFeesOverviewHandler = async (input: GetFeesOverviewInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getFeesOverview(overviewOptions(input));
-    return createSuccessResponse(`Fees overview: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getFeesOverview(overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting fees overview: ${errorMessage(error)}`);
   }
@@ -342,8 +385,8 @@ export const getFeesOverviewHandler = async (input: GetFeesOverviewInput): Promi
 
 export const getFeesOverviewByChainHandler = async (input: GetFeesOverviewByChainInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getFeesOverviewByChain(input.chain, overviewOptions(input));
-    return createSuccessResponse(`Fees overview (chain): ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getFeesOverviewByChain(input.chain, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting fees overview for chain: ${errorMessage(error)}`);
   }
@@ -351,8 +394,8 @@ export const getFeesOverviewByChainHandler = async (input: GetFeesOverviewByChai
 
 export const getFeeSummaryHandler = async (input: GetFeeSummaryInput): Promise<ToolResultSchema> => {
   try {
-    const data = await defiLlamaClient.getFeeSummary(input.protocol, overviewOptions(input));
-    return createSuccessResponse(`Fees summary: ${JSON.stringify(data, null, 2)}`);
+    const data = await defiLlamaClient.getFeeSummary(input.protocol, overviewQuery(input));
+    return jsonResponse(humanizeDates(compactOverview(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting fees summary: ${errorMessage(error)}`);
   }

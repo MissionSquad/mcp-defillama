@@ -69,15 +69,19 @@ export interface ProtocolTvl {
   symbol: string;
   url: string;
   description: string;
-  tvl: number;
+  /** Current TVL (number) or an aggregate historical series, depending on the endpoint shape. */
+  tvl: number | TvlItem[];
   tokensInUsd?: Array<{
     date: number;
     tokens: Record<string, number>;
   }>;
-  tokens?: Record<string, TokenBalance>;
-  chainTvls: Record<string, number>;
+  tokens?: Record<string, TokenBalance> | Array<{ date: number; tokens: Record<string, number> }>;
+  /** Current TVL per chain (present on the live API). */
+  currentChainTvls?: Record<string, number>;
+  /** Per-chain TVL: flat current numbers, or historical {tvl,tokens,tokensInUsd} objects. */
+  chainTvls: Record<string, number | { tvl?: TvlItem[]; tokens?: unknown; tokensInUsd?: unknown }>;
   tvlPriceChange?: Record<string, number>;
-  tvlList: TvlItem[];
+  tvlList?: TvlItem[];
 }
 
 // Chain TVL interfaces
@@ -192,18 +196,7 @@ export class DefiLlamaClient {
     if (!protocol) {
       throw new Error("Protocol name is required");
     }
-
-    const data = await this.request<ProtocolTvl>(DEFILLAMA_HOSTS.api, `/protocol/${protocol}`);
-
-    // Ensure tvlList exists for downstream consumers that expect a series.
-    if (!data.tvlList && data.tvl) {
-      data.tvlList = [{
-        date: Math.floor(Date.now() / 1000),
-        totalLiquidityUSD: data.tvl,
-      }];
-    }
-
-    return data;
+    return this.request<ProtocolTvl>(DEFILLAMA_HOSTS.api, `/protocol/${protocol}`);
   }
 
   /** GET /v2/historicalChainTvl — historical TVL across all chains. */

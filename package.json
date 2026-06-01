@@ -1,6 +1,6 @@
 {
   "name": "@missionsquad/mcp-defillama",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "MCP server for the DefiLlama API — exposes DeFi protocol TVL, chain TVL, token prices, and stablecoin data to MCP clients",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,8 +20,8 @@
     "build": "tsc && chmod +x dist/index.js",
     "start": "node dist/index.js",
     "dev": "tsc -w",
-    "test": "yarn build && env TEST_MODE=true node tests/defillama.test.js",
-    "test:no-mock": "yarn build && env TEST_MODE=false node tests/defillama.test.js",
+    "test": "yarn build && env TEST_MODE=true node --test tests/*.test.js",
+    "test:no-mock": "yarn build && env TEST_MODE=false node --test tests/*.test.js",
     "prepare": "yarn build"
   },
   "keywords": [
@@ -45,9 +45,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "luxon": "^3.7.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.1",
     "@types/node": "^20.0.0",
     "typescript": "^5.0.0"
   }

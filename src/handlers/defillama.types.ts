@@ -2,30 +2,53 @@
 // Shared
 // ---------------------------------------------------------------------------
 
+/** A 12-hour datetime string ("06/15/2024 03:30 PM", UTC assumed) or UNIX seconds. */
+export type DateTimeInput = string | number;
+
+/** Options that control response compaction (all optional). */
+export interface CompactInput {
+  /** Return the complete, untrimmed response instead of the compact default. */
+  full?: boolean;
+}
+
+/** Adds a downsampling control for time-series responses. */
+export interface SeriesCompactInput extends CompactInput {
+  /** Max number of data points to keep (default 30). */
+  points?: number;
+}
+
+/** Adds an item cap for list responses. */
+export interface ListCompactInput extends CompactInput {
+  /** Max number of items to keep. */
+  limit?: number;
+}
+
 /** Query options shared by the DEX/options/fees overview & summary endpoints. */
-export interface OverviewOptionsInput {
+export interface OverviewOptionsInput extends CompactInput {
   excludeTotalDataChart?: boolean;
   excludeTotalDataChartBreakdown?: boolean;
   dataType?: string;
+  /** Max number of chart points to keep (default 30). */
+  points?: number;
+  /** Max number of protocols to keep in the breakdown. */
+  limit?: number;
 }
 
 // ---------------------------------------------------------------------------
 // TVL
 // ---------------------------------------------------------------------------
 
-export interface GetProtocolsInput {
-  // No input parameters needed
-}
+export interface GetProtocolsInput extends ListCompactInput {}
 
-export interface GetProtocolTvlInput {
+export interface GetProtocolTvlInput extends SeriesCompactInput {
   protocol: string;
+  /** Include token-level balances/breakdowns in the response. */
+  includeTokens?: boolean;
 }
 
-export interface GetHistoricalChainTvlInput {
-  // No input parameters needed
-}
+export interface GetHistoricalChainTvlInput extends SeriesCompactInput {}
 
-export interface GetChainTvlInput {
+export interface GetChainTvlInput extends SeriesCompactInput {
   chain: string;
 }
 
@@ -33,9 +56,7 @@ export interface GetCurrentProtocolTvlInput {
   protocol: string;
 }
 
-export interface GetChainsInput {
-  // No input parameters needed
-}
+export interface GetChainsInput extends ListCompactInput {}
 
 // ---------------------------------------------------------------------------
 // Coins / Prices
@@ -47,18 +68,19 @@ export interface GetTokenPricesInput {
 
 export interface GetHistoricalPricesInput {
   coins: string[];
-  timestamp: number;
+  timestamp: DateTimeInput;
 }
 
 export interface GetBatchHistoricalPricesInput {
-  coins: Record<string, number[]>;
+  /** Map of coin identifier to an array of datetime strings or UNIX seconds. */
+  coins: Record<string, DateTimeInput[]>;
   searchWidth?: string;
 }
 
-export interface GetPriceChartInput {
+export interface GetPriceChartInput extends SeriesCompactInput {
   coins: string[];
-  start?: number;
-  end?: number;
+  start?: DateTimeInput;
+  end?: DateTimeInput;
   span?: number;
   period?: string;
   searchWidth?: string;
@@ -66,7 +88,7 @@ export interface GetPriceChartInput {
 
 export interface GetPricePercentageChangeInput {
   coins: string[];
-  timestamp?: number;
+  timestamp?: DateTimeInput;
   lookForward?: boolean;
   period?: string;
 }
@@ -77,47 +99,43 @@ export interface GetFirstPricesInput {
 
 export interface GetBlockInput {
   chain: string;
-  timestamp: number;
+  timestamp: DateTimeInput;
 }
 
 // ---------------------------------------------------------------------------
 // Stablecoins
 // ---------------------------------------------------------------------------
 
-export interface GetStablecoinsInput {
+export interface GetStablecoinsInput extends ListCompactInput {
   includePrices?: boolean;
 }
 
-export interface GetStablecoinChartsAllInput {
+export interface GetStablecoinChartsAllInput extends SeriesCompactInput {
   stablecoin?: number | string;
 }
 
-export interface GetStablecoinChartsChainInput {
+export interface GetStablecoinChartsChainInput extends SeriesCompactInput {
   chain: string;
   stablecoin?: number | string;
 }
 
-export interface GetStablecoinDataInput {
+export interface GetStablecoinDataInput extends SeriesCompactInput {
   asset: string;
+  /** Include token-level breakdowns in the response. */
+  includeTokens?: boolean;
 }
 
-export interface GetStablecoinChainsInput {
-  // No input parameters needed
-}
+export interface GetStablecoinChainsInput extends ListCompactInput {}
 
-export interface GetStablecoinPricesInput {
-  // No input parameters needed
-}
+export interface GetStablecoinPricesInput extends SeriesCompactInput {}
 
 // ---------------------------------------------------------------------------
 // Yields / APY
 // ---------------------------------------------------------------------------
 
-export interface GetPoolsInput {
-  // No input parameters needed
-}
+export interface GetPoolsInput extends ListCompactInput {}
 
-export interface GetPoolChartInput {
+export interface GetPoolChartInput extends SeriesCompactInput {
   pool: string;
 }
 
