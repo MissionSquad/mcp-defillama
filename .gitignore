@@ -1,2 +1,19 @@
+# Dependencies
 node_modules
+
+# Build output
 dist
+
+# Logs
+*.log
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.*
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode

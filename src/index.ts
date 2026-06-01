@@ -12,16 +12,13 @@ import {
 import { handlers, tools } from "./tools.js";
 
 const server = new Server({
-  name: "mcp-server-defillama",
+  name: "mcp-defillama",
   version: "1.0.0",
 }, {
   capabilities: {
     tools: {}
   }
 });
-
-const transport = new StdioServerTransport();
-await server.connect(transport);
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
@@ -39,3 +36,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   }
   return { toolResult: { error: "Method not found" }, content: [], isError: true };
 });
+
+const transport = new StdioServerTransport();
+await server.connect(transport);

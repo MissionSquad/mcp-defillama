@@ -1,23 +1,51 @@
 {
-  "name": "@mcp-dockmaster/mcp-server-defillama",
+  "name": "@missionsquad/mcp-defillama",
   "version": "1.0.0",
-  "description": "MCP server for DefiLlama API",
+  "description": "MCP server for the DefiLlama API — exposes DeFi protocol TVL, chain TVL, token prices, and stablecoin data to MCP clients",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "mcp-server-defillama": "./dist/index.js"
+    "mcp-defillama": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
-    "prepare": "npm run build",
-    "test": "npm run build && env TEST_MODE=true node tests/defillama.test.js",
-    "test:no-mock": "npm run build && env TEST_MODE=false node tests/defillama.test.js",
     "build": "tsc && chmod +x dist/index.js",
     "start": "node dist/index.js",
     "dev": "tsc -w",
-    "postinstall": "npm run build"
+    "test": "yarn build && env TEST_MODE=true node tests/defillama.test.js",
+    "test:no-mock": "yarn build && env TEST_MODE=false node tests/defillama.test.js",
+    "prepare": "yarn build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "defillama",
+    "defi",
+    "tvl",
+    "stablecoins",
+    "crypto"
+  ],
+  "author": "MissionSquad",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/missionsquad/mcp-defillama.git"
+  },
+  "homepage": "https://github.com/missionsquad/mcp-defillama#readme",
+  "bugs": {
+    "url": "https://github.com/missionsquad/mcp-defillama/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.1"
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
