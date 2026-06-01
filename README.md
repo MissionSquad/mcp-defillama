@@ -54,9 +54,9 @@ This downloads and executes the server from npm. The server communicates over st
 ```bash
 git clone https://github.com/missionsquad/mcp-defillama.git
 cd mcp-defillama
-yarn install     # or: npm install
-yarn build       # or: npm run build
-yarn start       # or: npm start
+yarn install
+yarn build
+yarn start
 ```
 
 ## Configuring an MCP client
