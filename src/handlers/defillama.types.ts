@@ -125,7 +125,7 @@ export interface GetStablecoinDataInput extends SeriesCompactInput {
   includeTokens?: boolean;
 }
 
-export interface GetStablecoinChainsInput extends CompactInput {}
+export interface GetStablecoinChainsInput extends ListCompactInput {}
 
 export interface GetStablecoinPricesInput extends SeriesCompactInput {}
 

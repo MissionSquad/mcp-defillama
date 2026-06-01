@@ -339,11 +339,11 @@ export const tools = [
   {
     name: "defillama_get_stablecoin_chains",
     description:
-      "Get current stablecoin totals for each chain. " +
-      "Example: { \"full\": false (optional) }",
+      "Get current stablecoin totals for each chain (trimmed to the largest by circulating supply). " +
+      "Example: { \"limit\": 50 (optional), \"full\": false (optional) }",
     inputSchema: {
       type: "object",
-      properties: { ...pointsProp, ...fullProp },
+      properties: { ...limitProp, ...fullProp },
       required: []
     }
   },

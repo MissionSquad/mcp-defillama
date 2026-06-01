@@ -8,6 +8,8 @@ import {
   compactProtocols,
   compactProtocolTvl,
   compactPools,
+  compactStablecoins,
+  compactStablecoinChains,
 } from '../dist/handlers/transform.js';
 
 // 2024-01-01T00:00:00Z
@@ -158,6 +160,73 @@ describe('compactProtocolTvl size reduction', () => {
     const compact = compactProtocolTvl(makeBigProtocol(), { includeTokens: true, points: 10 });
     assert.ok(Array.isArray(compact.tokensInUsd));
     assert.strictEqual(compact.tokensInUsd.length, 10);
+  });
+});
+
+describe('compactStablecoins', () => {
+  it('sorts by circulating supply (object field) and keeps the largest', () => {
+    const peggedAssets = [
+      { id: '1', name: 'small', symbol: 'S', circulating: { peggedUSD: 100 } },
+      { id: '2', name: 'huge', symbol: 'H', circulating: { peggedUSD: 999 } },
+      { id: '3', name: 'tiny', symbol: 'T', circulating: { peggedUSD: 5 } },
+    ];
+    const out = compactStablecoins({ peggedAssets }, { limit: 2 });
+    assert.strictEqual(out.total, 3);
+    assert.strictEqual(out.returned, 2);
+    assert.deepStrictEqual(out.peggedAssets.map(s => s.id), ['2', '1']); // largest first
+  });
+
+  it('falls back to non-USD pegs for the sort magnitude', () => {
+    const peggedAssets = [
+      { id: 'usd', circulating: { peggedUSD: 10 } },
+      { id: 'eur', circulating: { peggedEUR: 1000 } },
+    ];
+    const out = compactStablecoins({ peggedAssets }, { limit: 1 });
+    assert.deepStrictEqual(out.peggedAssets.map(s => s.id), ['eur']);
+  });
+});
+
+describe('compactStablecoinChains', () => {
+  it('treats /stablecoinchains as a list: sorts, caps, and reports totals (no series downsample)', () => {
+    const chains = Array.from({ length: 80 }, (_, i) => ({
+      name: `chain-${i}`,
+      gecko_id: null,
+      tokenSymbol: 'X',
+      totalCirculatingUSD: { peggedUSD: i },
+    }));
+    const out = compactStablecoinChains(chains, { limit: 25 });
+    assert.strictEqual(out.total, 80);
+    assert.strictEqual(out.returned, 25);
+    assert.strictEqual(out.chains.length, 25);
+    assert.strictEqual(out.chains[0].name, 'chain-79'); // largest first, not positional sampling
+  });
+
+  it('returns the raw list when full is set', () => {
+    const chains = [{ name: 'ethereum', totalCirculatingUSD: { peggedUSD: 1 } }];
+    assert.deepStrictEqual(compactStablecoinChains(chains, { full: true }), chains);
+  });
+});
+
+describe('compactProtocolTvl per-chain TVL', () => {
+  it('keeps currentChainTvls when the API provides it', () => {
+    const out = compactProtocolTvl({ name: 'p', currentChainTvls: { ethereum: 5 }, chainTvls: {} }, {});
+    assert.deepStrictEqual(out.currentChainTvls, { ethereum: 5 });
+  });
+
+  it('derives current per-chain TVL from a flat chainTvls map', () => {
+    const out = compactProtocolTvl({ name: 'p', chainTvls: { ethereum: 800, polygon: 200 } }, {});
+    assert.deepStrictEqual(out.currentChainTvls, { ethereum: 800, polygon: 200 });
+  });
+
+  it('derives current per-chain TVL from a historical chainTvls map', () => {
+    const out = compactProtocolTvl({
+      name: 'p',
+      chainTvls: {
+        Arbitrum: { tvl: [{ date: 1, totalLiquidityUSD: 10 }, { date: 2, totalLiquidityUSD: 42 }] },
+      },
+    }, {});
+    assert.deepStrictEqual(out.currentChainTvls, { Arbitrum: 42 }); // last point
+    assert.strictEqual(out.chainTvls, undefined); // heavy history dropped
   });
 });
 

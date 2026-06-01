@@ -68,19 +68,43 @@ function deepDownsample(value: any, max: number): any {
   return value;
 }
 
-/** Trim an entity list: sort (desc) by a key, cap length, and pick fields. */
+/** Trim an entity list: sort (desc) by a derived value, cap length, pick fields. */
+type SortValue = (item: any) => number;
+
 function trimList(
   arr: any[],
   fields: string[],
   limit: number,
-  sortKey?: string
+  sortValue?: SortValue
 ): { total: number; returned: number; items: any[] } {
   let items = arr;
-  if (sortKey) {
-    items = [...arr].sort((a, b) => (Number(b?.[sortKey]) || 0) - (Number(a?.[sortKey]) || 0));
+  if (sortValue) {
+    items = [...arr].sort((a, b) => (sortValue(b) || 0) - (sortValue(a) || 0));
   }
   const sliced = items.slice(0, limit).map(item => (isObject(item) ? pickFields(item, fields) : item));
   return { total: arr.length, returned: sliced.length, items: sliced };
+}
+
+/** Numeric magnitude of a stablecoin circulating object ({peggedUSD|peggedEUR|peggedVAR}). */
+function circulatingValue(c: any): number {
+  if (typeof c === "number") return c;
+  if (isObject(c)) return Number(c.peggedUSD ?? c.peggedEUR ?? c.peggedVAR ?? 0) || 0;
+  return 0;
+}
+
+/** Reduce a chainTvls map (flat numbers OR historical {tvl:[...]}) to current per-chain numbers. */
+function currentChainTvlMap(chainTvls: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [chain, v] of Object.entries(chainTvls)) {
+    if (typeof v === "number") {
+      out[chain] = v;
+    } else if (isObject(v) && Array.isArray((v as any).tvl) && (v as any).tvl.length) {
+      const last = (v as any).tvl[(v as any).tvl.length - 1];
+      const value = last?.totalLiquidityUSD ?? last?.tvl;
+      if (typeof value === "number") out[chain] = value;
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +145,7 @@ const PROTOCOL_FIELDS = [
 
 export function compactProtocols(data: any, opts: CompactOptions = {}): any {
   if (opts.full || !Array.isArray(data)) return data;
-  const { total, returned, items } = trimList(data, PROTOCOL_FIELDS, opts.limit ?? 100, "tvl");
+  const { total, returned, items } = trimList(data, PROTOCOL_FIELDS, opts.limit ?? 100, p => Number(p?.tvl) || 0);
   return { total, returned, protocols: items };
 }
 
@@ -130,8 +154,17 @@ export function compactProtocolTvl(data: any, opts: CompactOptions = {}): any {
   const points = opts.points ?? DEFAULT_POINTS;
 
   const out: Record<string, any> = pickFields(data, [
-    "name", "symbol", "url", "category", "chains", "currentChainTvls", "tvlPriceChange",
+    "name", "symbol", "url", "category", "chains", "tvlPriceChange",
   ]);
+
+  // Current per-chain TVL: prefer the API's `currentChainTvls`, otherwise derive
+  // it from `chainTvls` (which may be flat numbers or historical {tvl:[...]}).
+  if (isObject(data.currentChainTvls)) {
+    out.currentChainTvls = data.currentChainTvls;
+  } else if (isObject(data.chainTvls)) {
+    const current = currentChainTvlMap(data.chainTvls);
+    if (Object.keys(current).length) out.currentChainTvls = current;
+  }
 
   // Aggregate TVL: the API may return `tvl` as a number or a historical series.
   const series = Array.isArray(data.tvl) ? data.tvl
@@ -161,7 +194,7 @@ const CHAIN_FIELDS = ["name", "tvl", "tokenSymbol", "chainId", "gecko_id"];
 
 export function compactChains(data: any, opts: CompactOptions = {}): any {
   if (opts.full || !Array.isArray(data)) return data;
-  const { total, returned, items } = trimList(data, CHAIN_FIELDS, opts.limit ?? 200, "tvl");
+  const { total, returned, items } = trimList(data, CHAIN_FIELDS, opts.limit ?? 200, c => Number(c?.tvl) || 0);
   return { total, returned, chains: items };
 }
 
@@ -175,7 +208,7 @@ export function compactPools(data: any, opts: CompactOptions = {}): any {
   // /pools returns { status, data: [...] }.
   const pools = isObject(data) && Array.isArray(data.data) ? data.data : data;
   if (!Array.isArray(pools)) return data;
-  const { total, returned, items } = trimList(pools, POOL_FIELDS, opts.limit ?? 50, "tvlUsd");
+  const { total, returned, items } = trimList(pools, POOL_FIELDS, opts.limit ?? 50, p => Number(p?.tvlUsd) || 0);
   return { total, returned, pools: items };
 }
 
@@ -183,8 +216,21 @@ const STABLECOIN_FIELDS = ["id", "name", "symbol", "pegType", "pegMechanism", "p
 
 export function compactStablecoins(data: any, opts: CompactOptions = {}): any {
   if (opts.full || !isObject(data) || !Array.isArray(data.peggedAssets)) return data;
-  const { total, returned, items } = trimList(data.peggedAssets, STABLECOIN_FIELDS, opts.limit ?? 100, "circulating");
+  const { total, returned, items } = trimList(
+    data.peggedAssets, STABLECOIN_FIELDS, opts.limit ?? 100, s => circulatingValue(s?.circulating)
+  );
   return { total, returned, peggedAssets: items };
+}
+
+const STABLECOIN_CHAIN_FIELDS = ["name", "gecko_id", "tokenSymbol", "totalCirculatingUSD"];
+
+/** /stablecoinchains is a per-chain entity list (not a time series). */
+export function compactStablecoinChains(data: any, opts: CompactOptions = {}): any {
+  if (opts.full || !Array.isArray(data)) return data;
+  const { total, returned, items } = trimList(
+    data, STABLECOIN_CHAIN_FIELDS, opts.limit ?? 200, c => circulatingValue(c?.totalCirculatingUSD)
+  );
+  return { total, returned, chains: items };
 }
 
 export function compactStablecoinData(data: any, opts: CompactOptions = {}): any {
@@ -222,7 +268,7 @@ export function compactOverview(data: any, opts: CompactOptions = {}): any {
   if (Array.isArray(out.totalDataChartBreakdown)) out.totalDataChartBreakdown = downsample(out.totalDataChartBreakdown, points);
 
   if (Array.isArray(out.protocols)) {
-    const { total, returned, items } = trimList(out.protocols, OVERVIEW_PROTOCOL_FIELDS, opts.limit ?? 50, "total24h");
+    const { total, returned, items } = trimList(out.protocols, OVERVIEW_PROTOCOL_FIELDS, opts.limit ?? 50, p => Number(p?.total24h) || 0);
     out.protocols = items;
     out.totalProtocols = total;
     out.returnedProtocols = returned;

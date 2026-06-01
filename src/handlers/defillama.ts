@@ -11,6 +11,7 @@ import {
   compactPools,
   compactStablecoins,
   compactStablecoinData,
+  compactStablecoinChains,
   compactOverview,
 } from "./transform.js";
 import {
@@ -261,7 +262,7 @@ export const getStablecoinDataHandler = async (input: GetStablecoinDataInput): P
 export const getStablecoinChainsHandler = async (input: GetStablecoinChainsInput): Promise<ToolResultSchema> => {
   try {
     const data = await defiLlamaClient.getStablecoinChains();
-    return jsonResponse(humanizeDates(input?.full ? data : compactSeries(data, compactOpts(input))));
+    return jsonResponse(humanizeDates(compactStablecoinChains(data, compactOpts(input))));
   } catch (error) {
     return createErrorResponse(`Error getting stablecoin chains: ${errorMessage(error)}`);
   }
