@@ -192,18 +192,7 @@ export class DefiLlamaClient {
     if (!protocol) {
       throw new Error("Protocol name is required");
     }
-
-    const data = await this.request<ProtocolTvl>(DEFILLAMA_HOSTS.api, `/protocol/${protocol}`);
-
-    // Ensure tvlList exists for downstream consumers that expect a series.
-    if (!data.tvlList && data.tvl) {
-      data.tvlList = [{
-        date: Math.floor(Date.now() / 1000),
-        totalLiquidityUSD: data.tvl,
-      }];
-    }
-
-    return data;
+    return this.request<ProtocolTvl>(DEFILLAMA_HOSTS.api, `/protocol/${protocol}`);
   }
 
   /** GET /v2/historicalChainTvl — historical TVL across all chains. */

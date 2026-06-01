@@ -6,9 +6,22 @@ No API key is required. The server routes each request to DefiLlama's category-s
 
 Published on npm as [`@missionsquad/mcp-defillama`](https://www.npmjs.com/package/@missionsquad/mcp-defillama).
 
+## Conventions
+
+These apply to every tool:
+
+- **Dates are human-readable.** Any datetime parameter accepts a 12-hour string such as `06/15/2024 03:30 PM` (UTC is assumed), `06/15/2024 03:30 PM America/New_York`, or `06/15/2024 03:30 PM +05:30`. A timezone, when supplied, is converted to UTC before the request is made. Raw UNIX seconds are also accepted. Date/timestamp fields in **responses** are likewise rendered as UTC strings (e.g. `01/01/2024 12:00:00 AM UTC`).
+- **Responses are compact by default.** To stay within model context limits, large payloads are trimmed: lists are sorted and capped, time series are downsampled (≈30 points), and noisy/heavy fields (logos, descriptions, token-level histories) are dropped. The output is minified JSON.
+- **Opt into more data** with these optional parameters where applicable:
+  - `full` (boolean) — return the complete, untrimmed response.
+  - `points` (number) — max time-series data points to keep (default 30).
+  - `limit` (number) — max items to keep for list endpoints.
+  - `includeTokens` (boolean) — include token-level breakdowns (`protocol_tvl`, `stablecoin_data`).
+  - For the DEX/options/fees overview & summary tools, the aggregate charts are excluded by default; set `excludeTotalDataChart: false` (or `full: true`) to include them.
+
 ## Tools
 
-The server exposes all **31** endpoints of the free (keyless) DefiLlama API as MCP tools. Required parameters are marked accordingly; everything else is optional.
+The server exposes all **31** endpoints of the free (keyless) DefiLlama API as MCP tools. Required parameters are marked accordingly; everything else is optional. Each tool's description includes a ready-to-use example.
 
 ### TVL
 
@@ -26,18 +39,18 @@ The server exposes all **31** endpoints of the free (keyless) DefiLlama API as M
 
 - `defillama_get_token_prices` — Current prices of tokens.
   - `coins` (string[], required): e.g. `["ethereum:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"]`.
-- `defillama_get_historical_prices` — Token prices at a historical timestamp.
-  - `coins` (string[], required), `timestamp` (number, required): UNIX seconds.
-- `defillama_get_batch_historical_prices` — Prices for many coins at many timestamps.
-  - `coins` (object, required): map of coin id → array of timestamps. `searchWidth` (string, optional).
+- `defillama_get_historical_prices` — Token prices at a historical date/time.
+  - `coins` (string[], required), `timestamp` (datetime, required).
+- `defillama_get_batch_historical_prices` — Prices for many coins at many dates/times.
+  - `coins` (object, required): map of coin id → array of datetime strings. `searchWidth` (string, optional).
 - `defillama_get_price_chart` — Price chart over time for the given coins.
-  - `coins` (string[], required); optional `start`, `end`, `span`, `period`, `searchWidth`.
+  - `coins` (string[], required); optional `start` (datetime), `end` (datetime), `span`, `period`, `searchWidth`, `points`.
 - `defillama_get_price_percentage_change` — Percentage price change over a period.
-  - `coins` (string[], required); optional `timestamp`, `lookForward`, `period`.
+  - `coins` (string[], required); optional `timestamp` (datetime), `lookForward`, `period`.
 - `defillama_get_first_prices` — Earliest recorded price for the given coins.
   - `coins` (string[], required).
-- `defillama_get_block` — Block height closest to a timestamp on a chain.
-  - `chain` (string, required), `timestamp` (number, required).
+- `defillama_get_block` — Block height closest to a date/time on a chain.
+  - `chain` (string, required), `timestamp` (datetime, required).
 
 ### Stablecoins
 
