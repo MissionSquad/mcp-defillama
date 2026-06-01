@@ -3,6 +3,8 @@ import assert from 'node:assert';
 
 // Import the clients and factory
 import { getDefiLlamaClient } from '../dist/clients/defillama.factory.js';
+// Import the tool definitions and their handlers (loaded in mock mode via TEST_MODE)
+import { tools, handlers } from '../dist/tools.js';
 
 describe('DefiLlama Client Tests', async () => {
   let originalTestMode;
@@ -144,5 +146,79 @@ describe('DefiLlama Client Tests', async () => {
         { message: 'Asset name is required' }
       );
     });
+  });
+});
+
+// Minimal valid input for each required tool parameter, used to smoke-test
+// that every tool is wired through to a working handler in mock mode.
+const SAMPLE_INPUTS = {
+  protocol: 'aave',
+  chain: 'ethereum',
+  coins: ['ethereum:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'],
+  timestamp: 1666876743,
+  asset: '1',
+  pool: '747c1d2a-c668-4682-b9f9-296708a3dd90',
+};
+
+function buildInputFor(tool) {
+  const input = {};
+  for (const name of tool.inputSchema.required ?? []) {
+    if (name === 'coins' && tool.name === 'defillama_get_batch_historical_prices') {
+      input.coins = { 'ethereum:0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': [1666876743] };
+    } else if (name in SAMPLE_INPUTS) {
+      input[name] = SAMPLE_INPUTS[name];
+    } else {
+      throw new Error(`No sample input defined for required param "${name}" of ${tool.name}`);
+    }
+  }
+  return input;
+}
+
+describe('Tool registry', () => {
+  it('should expose all 31 free DefiLlama endpoints as tools', () => {
+    assert.strictEqual(tools.length, 31);
+  });
+
+  it('should have a handler registered for every tool', () => {
+    for (const tool of tools) {
+      assert.strictEqual(typeof handlers[tool.name], 'function', `missing handler for ${tool.name}`);
+    }
+  });
+
+  it('should not register handlers without a matching tool', () => {
+    const toolNames = new Set(tools.map(t => t.name));
+    for (const name of Object.keys(handlers)) {
+      assert.ok(toolNames.has(name), `handler ${name} has no matching tool`);
+    }
+  });
+
+  it('should have unique tool names', () => {
+    const names = tools.map(t => t.name);
+    assert.strictEqual(new Set(names).size, names.length);
+  });
+});
+
+describe('Tool handlers (mock mode)', () => {
+  // Handlers capture the client at import time; TEST_MODE=true makes that the mock.
+  for (const tool of tools) {
+    it(`${tool.name} returns a successful result`, async () => {
+      const result = await handlers[tool.name](buildInputFor(tool));
+      assert.strictEqual(result.isError, false, JSON.stringify(result));
+      assert.ok(Array.isArray(result.content));
+      assert.ok(result.content.length > 0);
+      assert.strictEqual(result.content[0].type, 'text');
+    });
+  }
+
+  it('returns an error result when a required path parameter is missing', async () => {
+    const result = await handlers['defillama_get_chain_tvl']({ chain: '' });
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0].text, /Chain name is required/);
+  });
+
+  it('returns an error result when coins are missing', async () => {
+    const result = await handlers['defillama_get_first_prices']({ coins: [] });
+    assert.strictEqual(result.isError, true);
+    assert.match(result.content[0].text, /At least one coin is required/);
   });
 });
